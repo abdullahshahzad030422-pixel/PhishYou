@@ -25,10 +25,13 @@ export interface TestConnectionResponse {
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /** Provider reasoning payload (e.g. OpenRouter reasoning_details) passed back unmodified. */
+  reasoning_details?: unknown;
 }
 
 export interface ChatResponse {
   content: string;
+  reasoning_details?: unknown;
 }
 
 export function fetchAIConfig(): Promise<AIStatusResponse> {
@@ -50,7 +53,8 @@ export function sendChatMessage(messages: ChatMessage[]): Promise<ChatResponse> 
   return apiFetch<ChatResponse>('/api/v1/ai/chat', {
     method: 'POST',
     body: { messages },
-    timeoutMs: 30000,
+    // Reasoning models can take noticeably longer to produce a reply.
+    timeoutMs: 120000,
   });
 }
 

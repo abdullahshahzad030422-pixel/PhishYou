@@ -3,10 +3,14 @@ export type ChatRole = 'system' | 'user' | 'assistant';
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  /** Provider-specific reasoning payload (e.g. OpenRouter reasoning_details) passed back unmodified. */
+  reasoning_details?: unknown;
 }
 
 export interface ChatResponse {
   content: string;
+  /** Provider reasoning payload to pass back unmodified on subsequent turns. */
+  reasoning_details?: unknown;
 }
 
 export interface AIProvider {

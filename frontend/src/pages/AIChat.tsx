@@ -51,7 +51,17 @@ export default function AIChat() {
 
     try {
       const reply = await sendChatMessage(nextMessages);
-      setMessages((prev) => [...prev, { role: 'assistant', content: reply.content }]);
+      // Preserve reasoning_details so reasoning models continue from where they left off.
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: reply.content,
+          ...(reply.reasoning_details !== undefined
+            ? { reasoning_details: reply.reasoning_details }
+            : {}),
+        },
+      ]);
     } catch (err) {
       setError(getErrorMessage(err));
       // Remove the user message on error so the conversation stays consistent

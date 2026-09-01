@@ -3,6 +3,7 @@ import type { AIProvider, ChatMessage, ChatResponse } from './types.js';
 interface OpenAICompatibleChoice {
   message?: {
     content?: string | null;
+    reasoning_details?: unknown;
   };
 }
 
@@ -31,7 +32,10 @@ export class QwenProvider implements AIProvider {
     private readonly endpoint: string,
   ) {}
 
-  private async call(messages: ChatMessage[], maxTokens: number): Promise<string> {
+  private async call(
+    messages: ChatMessage[],
+    maxTokens: number,
+  ): Promise<{ content: string; reasoning_details?: unknown }> {
     if (!this.apiKey || this.apiKey.trim().length < 8) {
       throw new Error('Missing or invalid LLM API key');
     }
@@ -60,25 +64,30 @@ export class QwenProvider implements AIProvider {
       throw new Error(`[${response.status}] ${safeErrorMessage(payload) || `Provider HTTP ${response.status}`}`);
     }
 
-    const content = payload.choices?.[0]?.message?.content;
+    const message = payload.choices?.[0]?.message;
+    const content = message?.content;
     if (typeof content !== 'string' || content.length === 0) {
       throw new Error('Provider returned an empty response');
     }
-    return content;
+    return { content, reasoning_details: message?.reasoning_details };
   }
 
   async testConnection(): Promise<void> {
+    // Reasoning models may spend part of the token budget on reasoning,
+    // so allow enough tokens for both reasoning and a visible reply.
     await this.call(
       [
         { role: 'system', content: 'You are a helpful assistant. Reply with only the word OK.' },
         { role: 'user', content: 'Ping' },
       ],
-      5,
+      256,
     );
   }
 
   async chat(messages: ChatMessage[]): Promise<ChatResponse> {
-    const content = await this.call(messages, 512);
-    return { content };
+    // Reasoning models consume part of this budget on internal reasoning,
+    // so keep it generous enough to still produce a visible reply.
+    const { content, reasoning_details } = await this.call(messages, 8192);
+    return { content, reasoning_details };
   }
 }
