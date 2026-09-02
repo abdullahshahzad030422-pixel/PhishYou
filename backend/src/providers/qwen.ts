@@ -1,4 +1,5 @@
 import type { AIProvider, ChatMessage, ChatResponse } from './types.js';
+// v2 — handles reasoning models that return empty content
 
 interface OpenAICompatibleChoice {
   message?: {
@@ -45,6 +46,9 @@ export class QwenProvider implements AIProvider {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.apiKey}`,
+        // OpenRouter requires these headers for attribution on free-tier models.
+        'HTTP-Referer': 'https://phishyou.app',
+        'X-Title': 'PhishYou',
       },
       body: JSON.stringify({
         model: this.model,
@@ -61,33 +65,58 @@ export class QwenProvider implements AIProvider {
     }
 
     if (!response.ok) {
+      const raw = JSON.stringify(payload);
+      // Log the full provider response to the backend console for diagnosis.
+      console.error(`[LLM] Provider error ${response.status}:`, raw);
       throw new Error(`[${response.status}] ${safeErrorMessage(payload) || `Provider HTTP ${response.status}`}`);
     }
 
     const message = payload.choices?.[0]?.message;
     const content = message?.content;
-    if (typeof content !== 'string' || content.length === 0) {
+    // Some reasoning models (e.g. Nemotron free tier) return an empty content
+    // field but put their reply inside reasoning_details. Accept either.
+    const reasoningText =
+      message?.reasoning_details &&
+      typeof (message.reasoning_details as Record<string, unknown>).content === 'string'
+        ? (message.reasoning_details as Record<string, unknown>).content as string
+        : null;
+
+    const finalContent = (typeof content === 'string' && content.length > 0)
+      ? content
+      : (reasoningText ?? '');
+
+    // Log for debugging
+    console.log('[LLM] Response debug:', {
+      hasChoices: !!payload.choices?.length,
+      hasMessage: !!message,
+      contentType: typeof content,
+      contentLength: typeof content === 'string' ? content.length : 0,
+      hasReasoningDetails: !!message?.reasoning_details,
+      finalContentLength: finalContent.length
+    });
+
+    if (!finalContent) {
       throw new Error('Provider returned an empty response');
     }
-    return { content, reasoning_details: message?.reasoning_details };
+    return { content: finalContent, reasoning_details: message?.reasoning_details };
   }
 
   async testConnection(): Promise<void> {
-    // Reasoning models may spend part of the token budget on reasoning,
-    // so allow enough tokens for both reasoning and a visible reply.
+    // Reasoning models spend most of their token budget on internal reasoning
+    // before producing visible output. Use a generous limit so testConnection
+    // doesn't fail with an empty response on free-tier reasoning models.
     await this.call(
       [
-        { role: 'system', content: 'You are a helpful assistant. Reply with only the word OK.' },
-        { role: 'user', content: 'Ping' },
+        { role: 'user', content: 'Say OK' },
       ],
-      256,
+      4096,
     );
   }
 
   async chat(messages: ChatMessage[]): Promise<ChatResponse> {
     // Reasoning models consume part of this budget on internal reasoning,
     // so keep it generous enough to still produce a visible reply.
-    const { content, reasoning_details } = await this.call(messages, 8192);
+    const { content, reasoning_details } = await this.call(messages, 16384);
     return { content, reasoning_details };
   }
 }
